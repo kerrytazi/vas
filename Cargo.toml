@@ -1,0 +1,22 @@
+[package]
+name = "vas"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rs-parser-generator = { path = "../rs-parser-generator" }
+inkwell = { version = "0.5.0", features = ["llvm18-0"] }
+anyhow = "1.0.95"
+scopeguard = "1.2.0"
+clap = { version = "4.5.27", features = ["derive"] }
+
+
+# git clone https://github.com/llvm/llvm-project.git --branch release/18.x
+# cd llvm-project
+# cd llvm
+# mkdir build
+# cd build
+# cmake ..
+# cmake --build . --target install --config Release
+#
+# env LLVM_SYS_180_PREFIX=<path-to-llvm>\llvm-project\llvm\build\Release
