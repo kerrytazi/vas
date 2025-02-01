@@ -3,7 +3,7 @@ use crate::frontend;
 use std::{cell::RefCell, rc::Rc};
 
 use anyhow::{Context as _, Result};
-use inkwell::{basic_block::BasicBlock, builder::Builder, context::Context, module::{Linkage, Module}, types::{AnyTypeEnum, BasicMetadataTypeEnum, BasicTypeEnum, FunctionType}, values::{BasicValueEnum, FunctionValue, PointerValue}};
+use inkwell::{basic_block::BasicBlock, builder::Builder, context::Context, module::{Linkage, Module}, types::{AnyTypeEnum, BasicMetadataTypeEnum, BasicTypeEnum, FunctionType}, values::{BasicValueEnum, FunctionValue, PointerValue}, AddressSpace};
 
 pub struct IntermediateCode {
 	ctx: &'static Context,
@@ -276,7 +276,7 @@ fn generate_expr<'ctx>(gen: &GenInfo<'ctx>, expr: &frontend::Expr) -> Result<Bas
 				}
 			}
 
-			let ptr_type = gen.ctx.ptr_type(inkwell::AddressSpace::default());
+			let ptr_type = gen.ctx.ptr_type(AddressSpace::default());
 			let ptr = gen.builder.build_alloca(ptr_type, "")?;
 			gen.builder.build_store(ptr, function.as_global_value())?;
 			let val = gen.builder.build_load(ptr_type, ptr, "")?.into_pointer_value();
@@ -290,11 +290,21 @@ fn generate_expr<'ctx>(gen: &GenInfo<'ctx>, expr: &frontend::Expr) -> Result<Bas
 
 fn generate_stmt(gen: &GenInfo, stmt: &frontend::Stmt) -> Result<()> {
 	match stmt {
-		frontend::Stmt::Let { name, expr } => {
+		frontend::Stmt::Let { name, expr, public } => {
 			let expr_result = generate_expr(gen, expr)?;
 
 			let val_type = expr_result.get_type();
-			let ptr = gen.builder.build_alloca(val_type, "")?;
+
+			let ptr = if *public {
+				let global = gen.module.add_global(expr_result.get_type(), None, name);
+				global.set_linkage(Linkage::Common);
+				let const_null = gen.ctx.ptr_type(AddressSpace::default()).const_null();
+				global.set_initializer(&const_null);
+				global.as_pointer_value()
+			} else {
+				gen.builder.build_alloca(val_type, "")?
+			};
+
 			gen.builder.build_store(ptr, expr_result)?;
 			gen.let_var(LocalVariable {
 				name: name.clone(),

@@ -17,7 +17,7 @@ Options:
 #[command(help_template=gen_help())]
 //#[command(verbatim_doc_comment, long_about=examples())]
 pub struct Cli {
-	#[arg(long="output-type", value_name="type", default_value="binary")]
+	#[arg(long="output-type", value_name="type", default_value="executable")]
 	pub output_type: OutputType,
 
 	#[arg(long="output-path", short='o', value_name="path")]
@@ -45,7 +45,8 @@ pub enum ToolchainType {
 
 #[derive(ValueEnum, Clone, PartialEq, Debug)]
 pub enum OutputType {
-	Binary,
+	Executable,
+	Library,
 	Object,
 	Asm,
 	LLVM,

@@ -68,7 +68,7 @@ pub enum Expr {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum Stmt {
-	Let{ name: String, expr: Expr },
+	Let{ name: String, expr: Expr, public: bool },
 	Ret{ expr: Option<Expr> },
 }
 
@@ -275,19 +275,20 @@ fn parse_expr(ctx: &mut ParseContext, tok: &parser::Token) -> Result<Expr> {
 fn parse_stmt(ctx: &mut ParseContext, tok: &parser::Token) -> Result<Stmt> {
 	match tok.ttype {
 		TokenType::StmtLet => {
-			let token = tok.subtoken(2, TokenType::Token)?;
-			let expr = tok.subtoken(6, TokenType::Expr)?;
+			let token = tok.subtoken(3, TokenType::Token)?;
+			let expr = tok.subtoken(7, TokenType::Expr)?;
 
 			return Ok(Stmt::Let{
 				name: token.source.to_owned(),
 				expr: parse_expr(ctx, expr)?,
+				public: !tok.subtoken(0, TokenType::StmtLetG0)?.tree.is_empty(),
 			});
 		},
-		TokenType::StmtRet => {
-			let maybe_group = tok.subtoken(1, TokenType::StmtRetG0)?;
+		TokenType::StmtReturn => {
+			let maybe_group = tok.subtoken(1, TokenType::StmtReturnG0)?;
 
 			if maybe_group.tree.len() > 0 {
-				let group = maybe_group.subtoken(0, TokenType::StmtRetG0G0)?;
+				let group = maybe_group.subtoken(0, TokenType::StmtReturnG0G0)?;
 				let expr = group.subtoken(1, TokenType::Expr)?;
 	
 				return Ok(Stmt::Ret{

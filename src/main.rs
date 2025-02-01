@@ -20,10 +20,6 @@ fn make_absolute(path: std::path::PathBuf) -> Result<std::path::PathBuf> {
 fn main() -> Result<()> {
 	let cli = cliargs::Cli::try_parse()?;
 
-	if cli.output_type != cliargs::OutputType::Binary {
-		return Err(anyhow::anyhow!("Currently output-type not supported"));
-	}
-
 	if cli.toolchain_type != cliargs::ToolchainType::MSVC {
 		return Err(anyhow::anyhow!("Currently toolchain-type not supported"));
 	}
@@ -58,8 +54,16 @@ fn main() -> Result<()> {
 		let root = frontend::parse(&parse_result.tok)?;
 		let code = backend::generate(&input_file_name, &root)?;
 
-		let obj_path = cache_dir.join(input_file_name + ".obj");
-		std::fs::write(&obj_path, code.to_obj()?)?;
+		let (data, ext) = match cli.output_type {
+			cliargs::OutputType::Executable |
+			cliargs::OutputType::Library |
+			cliargs::OutputType::Object => (code.to_obj()?, ".obj"),
+			cliargs::OutputType::Asm => (Vec::from(code.to_asm()?), ".asm"),
+			cliargs::OutputType::LLVM => (Vec::from(code.to_intermediate()?), ".ll"),
+		};
+
+		let obj_path = cache_dir.join(input_file_name + ext);
+		std::fs::write(&obj_path, data)?;
 
 		objs.push(obj_path);
 		inits.push(code.get_init_fn_name());
@@ -67,48 +71,60 @@ fn main() -> Result<()> {
 
 	// if prologue
 	{
-		let code = backend::generate_prologue("__prologue", &inits)?;
-		let obj_path = cache_dir.join("__prologue.obj");
-		std::fs::write(&obj_path, code.to_obj()?)?;
+		let input_file_name = "__prologue".to_owned();
+		let code = backend::generate_prologue(&input_file_name, &inits)?;
+
+		let (data, ext) = match cli.output_type {
+			cliargs::OutputType::Executable |
+			cliargs::OutputType::Library |
+			cliargs::OutputType::Object => (code.to_obj()?, ".obj"),
+			cliargs::OutputType::Asm => (Vec::from(code.to_asm()?), ".asm"),
+			cliargs::OutputType::LLVM => (Vec::from(code.to_intermediate()?), ".ll"),
+		};
+
+		let obj_path = cache_dir.join(input_file_name + ext);
+		std::fs::write(&obj_path, data)?;
 
 		objs.push(obj_path);
 
 		entry_name = code.get_init_fn_name();
 	}
 
-	match cli.toolchain_type {
-		cliargs::ToolchainType::MSVC => {
-			let toolchain_path = if let Some(path) = cli.toolchain_path {
-				make_absolute(path)?
-			} else {
-				// TODO
-				std::path::PathBuf::from(r"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.42.34433\bin\Hostx64\x64\")
-			};
+	if cli.output_type == cliargs::OutputType::Executable {
+		match cli.toolchain_type {
+			cliargs::ToolchainType::MSVC => {
+				let toolchain_path = if let Some(path) = cli.toolchain_path {
+					make_absolute(path)?
+				} else {
+					// TODO
+					std::path::PathBuf::from(r"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.42.34433\bin\Hostx64\x64\")
+				};
 
-			let linker_path = toolchain_path.join("link.exe");
+				let linker_path = toolchain_path.join("link.exe");
 
-			let res = std::process::Command::new(linker_path.as_os_str())
-				.arg("/NOLOGO")
-				.arg(format!("/ENTRY:{}", entry_name))
-				.arg("/SUBSYSTEM:CONSOLE")
-				.arg("/MACHINE:x64")
-				.arg(format!("/OUT:{}", output_file.as_os_str().to_str().with_context(|| format!("Invalid filename '{:?}'", output_file))?))
-				.args(objs)
-				.output()?;
+				let res = std::process::Command::new(linker_path.as_os_str())
+					.arg("/NOLOGO")
+					.arg(format!("/ENTRY:{}", entry_name))
+					.arg("/SUBSYSTEM:CONSOLE")
+					.arg("/MACHINE:x64")
+					.arg(format!("/OUT:{}", output_file.as_os_str().to_str().with_context(|| format!("Invalid filename '{:?}'", output_file))?))
+					.args(objs)
+					.output()?;
 
-			if !res.status.success() {
-				println!("link failed");
-				println!("link status: {}", res.status);
-				println!("link stdout: '{}'", String::from_utf8(res.stdout)?);
-				println!("link stderr: '{}'", String::from_utf8(res.stderr)?);
+				if !res.status.success() {
+					println!("link failed");
+					println!("link status: {}", res.status);
+					println!("link stdout: '{}'", String::from_utf8(res.stdout)?);
+					println!("link stderr: '{}'", String::from_utf8(res.stderr)?);
 
-				return Err(anyhow::anyhow!("Linker Error"));
+					return Err(anyhow::anyhow!("Linker Error"));
+				}
+			},
+			_ => {
+				return Err(anyhow::anyhow!("Toolchain type '{:?}' not supported", cli.toolchain_type));
 			}
-		},
-		_ => {
-			return Err(anyhow::anyhow!("Toolchain type '{:?}' not supported", cli.toolchain_type));
 		}
-	};
+	}
 
 	return Ok(());
 }

@@ -40,6 +40,7 @@ rs_parser_generator::rules!(
 	br_copen: "{";
 	br_cclose: "}";
 
+	kv_pub: "pub";
 	kv_let: "let";
 	kv_return: "return";
 
@@ -54,9 +55,9 @@ rs_parser_generator::rules!(
 	expr_add: expr_mul (ws (op_add | op_sub) ws expr_mul)?;
 	expr: expr_add;
 
-	stmt_let: kv_let wss token ws op_assign ws expr ws semi;
-	stmt_ret: kv_return ((wss expr)?) ws semi;
-	stmt: stmt_let | stmt_ret;
+	stmt_let: ((kv_pub wss)?) kv_let wss token ws op_assign ws expr ws semi;
+	stmt_return: kv_return ((wss expr)?) ws semi;
+	stmt: stmt_let | stmt_return;
 
 	file: ws (stmt ws)*;
 );
