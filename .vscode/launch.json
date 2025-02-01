@@ -10,7 +10,7 @@
 			"request": "launch",
 			"program": "${workspaceFolder}/target/debug/vas.exe",
 			//"args": ["--help"],
-			"args": ["--cache-dir", "target/test", "--output", "target/tt/test.exe", "src/tests/test.vas"],
+			"args": ["--cache-dir", "target/test/obj", "--output-path", "target/test/test.exe", "src/tests/test.vas"],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],

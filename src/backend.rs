@@ -3,7 +3,7 @@ use crate::frontend;
 use std::{cell::RefCell, rc::Rc};
 
 use anyhow::{Context as _, Result};
-use inkwell::{basic_block::BasicBlock, builder::Builder, context::Context, module::Module, types::{AnyTypeEnum, BasicMetadataTypeEnum, BasicTypeEnum, FunctionType}, values::{BasicValueEnum, FunctionValue, PointerValue}};
+use inkwell::{basic_block::BasicBlock, builder::Builder, context::Context, module::{Linkage, Module}, types::{AnyTypeEnum, BasicMetadataTypeEnum, BasicTypeEnum, FunctionType}, values::{BasicValueEnum, FunctionValue, PointerValue}};
 
 pub struct IntermediateCode {
 	ctx: &'static Context,
@@ -11,6 +11,22 @@ pub struct IntermediateCode {
 }
 
 impl IntermediateCode {
+	fn new(module_name: &str) -> IntermediateCode {
+		unsafe { 
+			let ctx = &*Box::into_raw(Box::new(Context::create()));
+			let module = &*Box::into_raw(Box::new(ctx.create_module(module_name)));
+
+			IntermediateCode {
+				ctx,
+				module,
+			}
+		}
+	}
+
+	pub fn get_init_fn_name(&self) -> String {
+		self.module.get_first_function().unwrap().get_name().to_str().unwrap().to_owned()
+	}
+
 	pub fn to_intermediate(&self) -> Result<String> {
 		Ok(self.module.to_string())
 	}
@@ -211,7 +227,7 @@ fn generate_expr<'ctx>(gen: &GenInfo<'ctx>, expr: &frontend::Expr) -> Result<Bas
 		frontend::Expr::Function { params, ret_type, code } => {
 			let ret_type = gen.find_any_type(&ret_type.name)?;
 			let fn_type = try_fn_type(ret_type, &params.iter().map(|param| gen.find_basic_type(&param.param_type.name).ok().map(|r| r.into())).collect::<Option<Vec<_>>>().with_context(|| format!("backend::generate_expr(...): Function: Can't find param types: {params:?}"))?, false)?;
-			let function = gen.module.add_function("", fn_type, None);
+			let function = gen.module.add_function("", fn_type, Some(Linkage::Internal));
 			let entry_block = gen.ctx.append_basic_block(function, "");
 
 			{
@@ -304,14 +320,14 @@ fn generate_stmt(gen: &GenInfo, stmt: &frontend::Stmt) -> Result<()> {
 }
 
 fn generate_root(gen: &GenInfo, root: &frontend::Root) -> Result<()> {
-	let start_fn_type = gen.ctx.void_type().fn_type(&[], false);
-	let start_function = gen.module.add_function("$start", start_fn_type, None);
-	let start_entry_block = gen.ctx.append_basic_block(start_function, "");
+	let init_fn_type = gen.ctx.void_type().fn_type(&[], false);
+	let init_function = gen.module.add_function(&format!("$init_{}", gen.module.get_name().to_str()?), init_fn_type, None);
+	let init_entry_block = gen.ctx.append_basic_block(init_function, "");
 
-	gen.builder.position_at_end(start_entry_block);
+	gen.builder.position_at_end(init_entry_block);
 
 	gen.functions.borrow_mut().push(Rc::new(RefCell::new(Function {
-		_func: start_function,
+		_func: init_function,
 		blocks: Vec::new(),
 	})));
 	let _guard_last_function = scopeguard::guard(gen.functions.clone(), |functions| {
@@ -319,7 +335,7 @@ fn generate_root(gen: &GenInfo, root: &frontend::Root) -> Result<()> {
 	});
 
 	gen.functions.borrow().last().unwrap().borrow_mut().blocks.push(Rc::new(RefCell::new(Block {
-		block: start_entry_block,
+		block: init_entry_block,
 		vars: Vec::new(),
 	})));
 	let _guard_last_block = scopeguard::guard(gen.functions.borrow().last().unwrap().clone(), |last_function| {
@@ -336,26 +352,42 @@ fn generate_root(gen: &GenInfo, root: &frontend::Root) -> Result<()> {
 }
 
 pub fn generate(module_name: &str, root: &frontend::Root) -> Result<IntermediateCode> {
-	// TODO: better way without unsafe?
-	let ctx = unsafe { &*Box::into_raw(Box::new(Context::create())) };
-	let module = unsafe{ &*Box::into_raw(Box::new(ctx.create_module(module_name))) };
-
-	let ic = IntermediateCode {
-		ctx,
-		module,
-	};
+	let ic = IntermediateCode::new(module_name);
 
 	{
-		let builder = ctx.create_builder();
+		let builder = ic.ctx.create_builder();
 
 		let gen = GenInfo {
-			ctx: ctx,
-			module: module,
+			ctx: ic.ctx,
+			module: ic.module,
 			builder: builder,
 			functions: Rc::new(RefCell::new(Vec::new())),
 		};
 
 		generate_root(&gen, root)?;
+	}
+
+	return Ok(ic);
+}
+
+
+pub fn generate_prologue(module_name: &str, inits: &[String]) -> Result<IntermediateCode> {
+	let ic = IntermediateCode::new(module_name);
+
+	{
+		let builder = ic.ctx.create_builder();
+		let start_fn_type = ic.ctx.void_type().fn_type(&[], false);
+		let start_function = ic.module.add_function("$start", start_fn_type, None);
+		let start_block = ic.ctx.append_basic_block(start_function, "");
+
+		builder.position_at_end(start_block);
+
+		for init in inits {
+			let init_func = ic.module.add_function(init, start_fn_type, Some(Linkage::External));
+			builder.build_direct_call(init_func, &[], "")?;
+		}
+
+		builder.build_return(None)?;
 	}
 
 	return Ok(ic);
